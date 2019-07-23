@@ -1,0 +1,54 @@
+#!/bin/bash
+### current number of item 232332
+LR1_STG=11
+LR2_STG=371
+LIMIT=10
+SLEEP=600
+LOG_FILE=/var/ardendo/log/lores2migrate.log
+
+# query number of item that not have in lores in lores2 storage
+function count_items {
+    local SQL_COUNT="select count(*) from ardome.item where itm_id not in (select distinct min_itm_id from ardome.min where min_stg_id in (11, 371) and min_stg_id is not null and min_itm_id is not null and min_delete_ts is null) and itm_id in (select distinct min_itm_id from ardome.min where min_stg_id = 196 and min_itm_id is not null and min_file_name like '%.mxf' and min_delete_ts is null)"
+    count=$(adt --no-header --no-footer "$SQL_COUNT")
+    echo $count
+}
+
+function get_unsync_item {
+    local SQL="select itm_id from ardome.item where itm_id not in (select distinct min_itm_id from ardome.min where min_stg_id in (11, 371) and min_stg_id is not null and min_itm_id is not null and min_delete_ts is null) and itm_id in (select distinct min_itm_id from ardome.min where min_stg_id = 196 and min_itm_id is not null and min_file_name like '%.mxf' and min_delete_ts is null) limit $LIMIT"
+    local item_id=$(adt --no-header --no-footer "$SQL")
+    echo $item_id
+}
+
+## parse option for utilites check
+count_flag="false"
+while getopts "cl:s:h" opt; do
+  case $opt in
+    c) count_flag="true";;
+    l) LIMIT=$OPTARG;;
+    s) SLEEP=$OPTARG;;
+    h)
+    printf "All option ...\n"
+    printf "\t-c\tCount remain items\n"
+    printf "\t-l\tlimit item to migrate, default is 10 items\n"
+    printf "\t-s\tsleep between item, default is 5 seconds\n"
+    printf "\t-h\thelp\n"
+    exit;;
+    \?) echo "Invalid option -$opt" >&2
+    exit
+    ;;
+  esac
+done
+
+if [ $count_flag = "true" ]; then
+    echo "remain $(count_items) items"
+    exit
+fi
+
+# working triggering first item
+items=`get_unsync_item`
+for item_id in $items
+do
+    printf "migrate item $item_id\n" >> $LOG_FILE
+    transfermgr --no-http reqbrowse  --transcoder-profile=ardenc itm $item_id 
+    sleep $SLEEP
+done
